@@ -23,11 +23,10 @@ import {
   safeGetChatWorldbookName,
 } from "./worldbook_api.js";
 import { insertMemory } from "./rag_logic.js";
-import { RegexListComponent, getRegexModalHTML } from "./regex_ui.js";
+import { RegexListComponent } from "./regex_ui.js";
 
 let regexComponentPre = null;
 let regexComponentPost = null;
-let currentRegexTarget = "pre";
 
 // ==========================================
 // 1. 界面初始化
@@ -139,7 +138,7 @@ export function initSummarySettings() {
                         <span class="anima-label-text">正则</span>
                         <span class="anima-desc-inline">
                             在发送给 AI 总结之前对历史记录进行清洗。<br>
-                            例如 <code>/&lt;content&gt;(.*?)&lt;\\/content&gt;/gs</code> 会自动剥离标签。
+                            按标签提取正文、删除整块，或移除单个标签之前／之后的内容。
                         </span>
                     </div>
                     <button id="anima_btn_open_regex_modal_pre" class="anima-btn primary small">
@@ -239,7 +238,6 @@ export function initSummarySettings() {
             </div>
         </div>
 
-        ${getRegexModalHTML()}
         <div id="anima-summary-modal" class="anima-modal hidden">
              <div class="anima-modal-content">
                 <div class="anima-modal-header">
@@ -303,7 +301,7 @@ export function initSummarySettings() {
     () => settings.output_regex,
     (newData) => {
       settings.output_regex = newData;
-      aveSummarySettings(settings);
+      saveSummarySettings(settings);
     },
   );
   regexComponentPost.render();
@@ -924,12 +922,10 @@ function bindSummaryEvents() {
   );
 
   $("#anima_btn_open_regex_modal_pre").on("click", () => {
-    currentRegexTarget = "pre";
-    openRegexModal();
+    regexComponentPre.openAddModal();
   });
   $("#anima_btn_open_regex_modal_post").on("click", () => {
-    currentRegexTarget = "post";
-    openRegexModal();
+    regexComponentPost.openAddModal();
   });
 
   // === 新增：手动添加总结模态框事件 ===
@@ -1010,23 +1006,6 @@ function bindSummaryEvents() {
     }
   });
 
-  // === 模态框确定 ===
-  $("#anima_btn_confirm_add_regex").on("click", () => {
-    const type = $("#anima_new_regex_type").val();
-    const str = $("#anima_new_regex_str").val().trim();
-    if (!str) return toastr.warning("正则不能为空");
-    if (currentRegexTarget === "pre") {
-      if (regexComponentPre) regexComponentPre.addRule(str, type);
-    } else {
-      if (regexComponentPost) regexComponentPost.addRule(str, type);
-    }
-    $("#anima-regex-input-modal").addClass("hidden");
-  });
-
-  // === 关闭模态框 ===
-  $(".anima-close-regex-modal").on("click", () => {
-    $("#anima-regex-input-modal").addClass("hidden");
-  });
   // 🟢 2. 绑定新按钮：手动预览
   $("#anima-btn-manual-preview").on("click", () => {
     const start = parseInt($("#anima_manual_start").val());
@@ -1182,12 +1161,6 @@ function bindSummaryEvents() {
       updateStatusInputs();
     }
   });
-}
-
-function openRegexModal() {
-  $("#anima_new_regex_str").val("");
-  $("#anima_new_regex_type").val("extract");
-  $("#anima-regex-input-modal").removeClass("hidden");
 }
 
 // ==========================================

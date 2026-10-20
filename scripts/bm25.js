@@ -14,7 +14,7 @@ import {
   triggerBm25BuildBatch,
   saveDictionaryAndRebuild,
 } from "./bm25_logic.js";
-import { RegexListComponent, getRegexModalHTML } from "./regex_ui.js";
+import { RegexListComponent } from "./regex_ui.js";
 import { markAllBm25Unsynced } from "./worldbook_api.js";
 import { getLastRetrievalPayload } from "./rag_logic.js";
 import { loadAndRenderKbList } from "./knowledge.js";
@@ -272,7 +272,7 @@ function renderBm25UI(container, settings, dicts, words, libs) {
         .bm25-select option { background-color: #222; color: #ddd; }
         
         /* 🔥 新增：强力修复正则和Prompt列表内的下拉框排版，防止文字坠底 */
-        #bm25_regex_list select, #bm25_prompt_list select {
+        #bm25_prompt_list select {
             appearance: auto !important;
             height: 28px !important;
             line-height: normal !important;
@@ -578,33 +578,6 @@ function renderBm25UI(container, settings, dicts, words, libs) {
 function bindBm25Events() {
   const $tab = $("#tab-bm25");
 
-  // ✨ 1. 【修复】隔离注入 BM25 专属的正则弹窗，防止和 RAG 的弹窗 ID 冲突打架
-  if ($("#bm25-regex-input-modal").length === 0) {
-    // 暴力替换掉源 HTML 中的 RAG ID，生成一个全新的专属 DOM
-    const bm25RegexModal = getRegexModalHTML()
-      .replace(/id="anima-regex-input-modal"/g, 'id="bm25-regex-input-modal"')
-      .replace(/id="anima_new_regex_type"/g, 'id="bm25_new_regex_type"')
-      .replace(
-        /id="anima_new_regex_str"/g,
-        'id="bm25_new_regex_str" class="anima-input" style="background-color: rgba(0,0,0,0.3) !important; color: #fff !important; border: 1px solid rgba(255,255,255,0.2) !important;"',
-      )
-      .replace(
-        /id="anima_btn_confirm_add_regex"/g,
-        'id="bm25_btn_confirm_add_regex"',
-      );
-
-    $("body").append(bm25RegexModal);
-
-    // 绑定这一个专属模态框的关闭事件
-    $(document).on(
-      "click",
-      "#bm25-regex-input-modal .anima-close-regex-modal",
-      function () {
-        $("#bm25-regex-input-modal").addClass("hidden");
-      },
-    );
-  }
-
   // ✨ 2. 实例化并渲染正则列表组件
   const bm25RegexList = new RegexListComponent(
     "bm25_regex_list",
@@ -624,27 +597,9 @@ function bindBm25Events() {
     }
   });
 
-  // ✨ 4. 【修复】打开专属添加正则窗口事件
-  $tab
-    .find("#bm25_btn_open_regex_modal")
-    .off("click")
-    .on("click", () => {
-      $("#bm25_new_regex_type").val("extract");
-      $("#bm25_new_regex_str").val("");
-      $("#bm25-regex-input-modal").removeClass("hidden");
-    });
-
-  // 【修复】确认添加正则（绑定到专属的 Confirm 按钮上）
-  $("#bm25_btn_confirm_add_regex")
-    .off("click")
-    .on("click", () => {
-      const type = $("#bm25_new_regex_type").val();
-      const regexStr = $("#bm25_new_regex_str").val().trim();
-      if (!regexStr) return toastr.warning("正则不能为空");
-
-      bm25RegexList.addRule(regexStr, type);
-      $("#bm25-regex-input-modal").addClass("hidden");
-    });
+  $tab.find("#bm25_btn_open_regex_modal").off("click").on("click", () => {
+    bm25RegexList.openAddModal();
+  });
 
   // ✨ 5. 【新增】初始化渲染提示词列表
   renderBm25PromptList();

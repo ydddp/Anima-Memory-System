@@ -25,7 +25,7 @@ import {
   createRenderContext,
   smartFixYaml,
 } from "./utils.js";
-import { RegexListComponent, getRegexModalHTML } from "./regex_ui.js";
+import { RegexListComponent } from "./regex_ui.js";
 import { openGCManagementModal } from "./status_gc_ui.js";
 // 全局变量缓存
 let currentSettings = null;
@@ -941,76 +941,11 @@ function initStatusRegexModule() {
   );
   regexComponent.render();
 
-  // ============================================================
-  // 4. 【核心修改】模态框隔离逻辑
-  // ============================================================
-
-  // 定义一套 Status 页面专用的 ID
-  const modalId = "anima-regex-input-modal-status";
-  const inputTypeId = "anima_new_regex_type_status";
-  const inputStrId = "anima_new_regex_str_status";
-  const btnConfirmId = "anima_btn_confirm_add_regex_status";
-  const btnCloseClass = "anima-close-regex-modal-status";
-
-  // 检查是否已存在，不存在则创建
-  if ($("#" + modalId).length === 0) {
-    // 获取原始 HTML 模板
-    let html = getRegexModalHTML();
-
-    // 暴力替换 ID，生成独立副本
-    html = html.replace('id="anima-regex-input-modal"', `id="${modalId}"`);
-    html = html.replace('id="anima_new_regex_type"', `id="${inputTypeId}"`);
-    html = html.replace('id="anima_new_regex_str"', `id="${inputStrId}"`);
-    html = html.replace(
-      'id="anima_btn_confirm_add_regex"',
-      `id="${btnConfirmId}"`,
-    );
-    // 替换 Class 以便绑定关闭事件 (把原有的 class 替换掉或者追加)
-    html = html.replace(
-      'class="anima-close-regex-modal',
-      `class="${btnCloseClass} anima-close-regex-modal`,
-    );
-
-    $("body").append(html);
-
-    // 绑定关闭事件 (针对新 ID)
-    $(`#${modalId}, .${btnCloseClass}`).on("click", function (e) {
-      if (e.target === this || $(e.target).hasClass(btnCloseClass)) {
-        $(`#${modalId}`).removeClass("active").addClass("hidden");
-      }
-    });
-  }
-
-  // 5. 绑定“添加规则”按钮 (指向新的模态框 ID)
-  $("#btn-add-status-regex")
-    .off("click")
-    .on("click", () => {
-      const $modal = $(`#${modalId}`);
-      $modal.removeClass("hidden").addClass("active");
-
-      // 绑定确认按钮 (指向新的 Input ID)
-      $(`#${btnConfirmId}`)
-        .off("click")
-        .on("click", () => {
-          const type = $(`#${inputTypeId}`).val();
-          const regexStr = $(`#${inputStrId}`).val();
-          if (regexStr) {
-            regexComponent.addRule(regexStr, type);
-            $modal.removeClass("active").addClass("hidden");
-            $(`#${inputStrId}`).val("");
-          }
-        });
-    });
-}
-
-function bindRegexModalEvents() {
-  // 通用关闭 (点击背景)
-  $("#anima-regex-input-modal").on("click", function (e) {
-    if (e.target === this) {
-      $(this).removeClass("active").addClass("hidden");
-    }
+  $("#btn-add-status-regex").off("click").on("click", () => {
+    regexComponent.openAddModal();
   });
 }
+
 // ==========================================
 // 逻辑模块 0: 总开关
 // ==========================================

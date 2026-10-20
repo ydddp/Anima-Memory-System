@@ -1,238 +1,209 @@
-// scripts/regex_ui.js
+import { describeTagRule, saveRuleForm } from "./tag_rules.js";
 
-/**
- * 通用正则列表组件
- * 负责渲染列表、处理行内编辑、删除和排序
- */
+const escapeHtml = text => String(text ?? "").replace(/&/g, "&amp;")
+  .replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+function createRuleForm(original) {
+  let baseline = original;
+  const tags = original && describeTagRule(original);
+  let mode = !original?.regex || tags ? "tags" : "custom";
+  const $el = $(`<div class="anima-rule-form">
+    <div class="rule-tags">
+      <label>操作<select class="anima-select rule-operation">
+        <option value="extract">提取正文</option><option value="exclude">删除整块</option>
+        <option value="before">移除标签之前</option><option value="after">移除标签之后</option>
+      </select></label>
+      <div class="rule-delimiters">
+        <label>开始标签<input class="anima-input rule-start" type="text" placeholder="例如：<content>" spellcheck="false"></label>
+        <label>结束标签<input class="anima-input rule-end" type="text" placeholder="例如：</content>" spellcheck="false"></label>
+      </div>
+      <label class="rule-single" hidden>标签<input class="anima-input rule-tag" type="text" placeholder="例如：<content>" spellcheck="false"></label>
+      <p class="rule-help"></p>
+    </div>
+    <div class="rule-custom" hidden>
+      <label>规则类型<select class="anima-select edit-type">
+        <option value="extract">提取</option><option value="exclude">排除</option>
+      </select></label>
+      <label>正则表达式<textarea class="anima-input anima-textarea edit-input" rows="3" spellcheck="false"></textarea></label>
+    </div>
+    <button type="button" class="rule-mode-toggle"></button>
+    <div class="rule-error" role="alert" hidden></div>
+  </div>`);
+  $el.find(".rule-operation").val(tags?.operation || original?.type || "extract");
+  $el.find(".edit-type").val(tags?.type || original?.type || "extract");
+  $el.find(".rule-tag").val(tags?.tag || "");
+  $el.find(".rule-start").val(tags?.start || "");
+  $el.find(".rule-end").val(tags?.end || "");
+  $el.find(".edit-input").val(original?.regex || "");
+  const read = () => saveRuleForm({ mode, operation: $el.find(".rule-operation").val(), tag: $el.find(".rule-tag").val(),
+    type: $el.find(mode === "tags" ? ".rule-operation" : ".edit-type").val(),
+    start: $el.find(".rule-start").val(), end: $el.find(".rule-end").val(), regex: $el.find(".edit-input").val() }, baseline);
+  const showError = error => $el.find(".rule-error").text(error.message).prop("hidden", false);
+  const refresh = () => {
+    $el.find(".rule-tags").prop("hidden", mode !== "tags");
+    $el.find(".rule-custom").prop("hidden", mode !== "custom");
+    $el.find(".rule-mode-toggle").text(mode === "tags" ? "自定义正则" : "改用标签填写");
+    const operation = $el.find(".rule-operation").val();
+    const single = operation === "before" || operation === "after";
+    $el.find(".rule-single").prop("hidden", !single);
+    $el.find(".rule-delimiters").prop("hidden", single);
+    $el.find(".rule-help").text({
+      exclude: "删除这两个标签及其中的全部内容，保留其余文字。",
+      extract: "只保留这两个标签之间的正文，不包含标签。支持多行和多段内容。",
+      before: "移除第一个标签及其之前的全部内容，保留后面的文字。找不到标签时保持原文。",
+      after: "移除第一个标签及其之后的全部内容，保留前面的文字。找不到标签时保持原文。",
+    }[operation]);
+  };
+  $el.on("input change", "input, textarea, select", () => {
+    $el.find(".rule-error").prop("hidden", true); refresh();
+  });
+  $el.find(".rule-mode-toggle").on("click", () => {
+    try {
+      if (mode === "tags") {
+        // An empty new form may enter custom mode without inventing a pattern.
+        const single = ["before", "after"].includes($el.find(".rule-operation").val());
+        const empty = single ? !$el.find(".rule-tag").val()
+          : !$el.find(".rule-start").val() && !$el.find(".rule-end").val();
+        if (!empty) {
+          const rule = read();
+          $el.find(".edit-input").val(rule.regex);
+          $el.find(".edit-type").val(rule.type);
+        }
+        mode = "custom";
+      } else {
+        const empty = !$el.find(".edit-input").val().trim();
+        const rule = empty ? null : read();
+        const next = rule && describeTagRule(rule);
+        if (!empty && !next) throw new Error("这个表达式无法转换成标签规则，请继续使用自定义正则。");
+        baseline = rule;
+        $el.find(".rule-start").val(next?.start || "");
+        $el.find(".rule-end").val(next?.end || "");
+        $el.find(".rule-tag").val(next?.tag || "");
+        $el.find(".rule-operation").val(next?.operation || $el.find(".edit-type").val());
+        mode = "tags";
+      }
+      $el.find(".rule-error").prop("hidden", true); refresh();
+    } catch (error) { showError(error); }
+  });
+  refresh();
+  return { $el, read, showError };
+}
+
+/** Shared list for summary (pre/post), status, RAG, BM25 and GC. */
 export class RegexListComponent {
-  /**
-   * @param {string} containerId - 容器的 DOM ID (不带 #)
-   * @param {Function} getData - 获取当前数据数组的函数 () => Array
-   * @param {Function} onSave - 数据变更后的回调函数 (newData) => void
-   */
-  constructor(containerId, getData, onSave) {
+  constructor(containerId, getData, onSave, { field = "regex", toggle = true } = {}) {
     this.containerId = containerId;
-    this.getData = getData; // 必须是函数，确保获取最新引用
-    this.onSave = onSave; // 保存回调
+    this.getData = getData;
+    this.onSave = onSave;
+    this.field = field;
+    this.toggle = toggle;
     this.$container = $(`#${containerId}`);
   }
 
-  /**
-   * 主渲染方法
-   */
   render() {
     const listEl = this.$container;
-    const dataList = this.getData();
+    if (listEl.data("ui-sortable")) listEl.sortable("destroy");
     listEl.empty();
-
-    if (!dataList || dataList.length === 0) {
-      listEl.html(
-        `<div style="text-align:center; color:#666; font-size:12px; padding:10px;">暂无规则</div>`,
-      );
+    const dataList = this.getData() || [];
+    if (!dataList.length) {
+      listEl.html('<div class="rule-empty">暂无规则</div>');
       return;
     }
-
     dataList.forEach((item, index) => {
+      const rule = { regex: item[this.field], type: item.type };
+      const tags = describeTagRule(rule);
       const isExclude = item.type === "exclude";
-      const typeBadge = isExclude
-        ? `<span class="anima-tag danger">排除</span>`
-        : `<span class="anima-tag primary">提取</span>`;
-
-      const isEnabled = item.enabled !== false; // 兼容旧数据，未定义默认视为开启
-
-      const $row = $(`
-          <div class="anima-regex-item is-row" data-idx="${index}">
-              <div class="view-mode" style="display:flex; align-items:center; width:100%; gap:10px;">
-                  <i class="fa-solid fa-bars anima-drag-handle" style="cursor: grab; color: #888;"></i>
-                  
-                  <div class="regex-type-badge" style="width: 50px; text-align: center; flex-shrink: 0;">
-                      ${typeBadge}
-                  </div>
-
-                  <span class="regex-text" style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:monospace; color:#ccc; ${!isEnabled ? "text-decoration: line-through; opacity: 0.5;" : ""}">${this.escapeHtml(item.regex)}</span>
-                  
-                  <div class="regex-actions" style="display:flex; gap:8px; align-items:center; flex-shrink:0;">
-                      <label class="anima-switch" title="启用/禁用" style="margin: 0; flex: 0 0 44px; width: 44px; min-width: 44px;">
-                          <input type="checkbox" class="regex-toggle" ${isEnabled ? "checked" : ""}>
-                          <span class="anima-slider round"></span>
-                      </label>
-
-                      <div style="display:flex; gap:5px; flex-shrink: 0;">
-                          <button class="anima-btn secondary small btn-edit" title="编辑" aria-label="编辑规则"><i class="fa-solid fa-pen"></i></button>
-                          <button class="anima-btn danger small btn-del" title="删除" aria-label="删除规则"><i class="fa-solid fa-trash"></i></button>
-                      </div>
-                  </div>
-              </div>
-              
-              <div class="edit-mode" style="display:none; align-items:center; width:100%; gap:5px;">
-                  <select class="anima-select edit-type" style="width:80px; margin:0; flex-shrink:0;">
-                      <option value="extract">提取</option>
-                      <option value="exclude">排除</option>
-                  </select>
-                  <textarea class="anima-input anima-textarea edit-input" rows="1" spellcheck="false" aria-label="正则表达式" style="margin:0; flex:1;">${this.escapeHtml(item.regex)}</textarea>
-                  <button class="anima-btn primary small btn-save" title="保存" aria-label="保存规则"><i class="fa-solid fa-check"></i></button>
-                  <button class="anima-btn secondary small btn-cancel" title="取消" aria-label="取消编辑"><i class="fa-solid fa-xmark"></i></button>
-              </div>
+      const label = tags ? { extract: "提取正文", exclude: "删除整块", before: "移除标签之前", after: "移除标签之后" }[tags.operation]
+        : (isExclude ? "自定义排除" : "自定义提取");
+      const text = tags ? (tags.tag ?? `${tags.start} → ${tags.end}`) : rule.regex;
+      const isEnabled = !this.toggle || item.enabled !== false;
+      const $row = $(`<div class="anima-regex-item is-row" data-idx="${index}">
+        <div class="view-mode">
+          <i class="fa-solid fa-bars anima-drag-handle" title="拖动排序"></i>
+          <div class="regex-type-badge"><span class="anima-tag ${isExclude ? "danger" : "primary"}">${label}</span></div>
+          <span class="regex-text ${isEnabled ? "" : "rule-disabled"}" title="${escapeHtml(text)}">${escapeHtml(text)}</span>
+          <div class="regex-actions">
+            <label class="anima-switch" title="启用/禁用">
+              <input type="checkbox" class="regex-toggle" aria-label="启用规则" ${isEnabled ? "checked" : ""}>
+              <span class="anima-slider round"></span>
+            </label>
+            <button class="anima-btn secondary small btn-edit" title="编辑" aria-label="编辑规则"><i class="fa-solid fa-pen"></i></button>
+            <button class="anima-btn danger small btn-del" title="删除" aria-label="删除规则"><i class="fa-solid fa-trash"></i></button>
           </div>
-          `);
-
-      this._bindItemEvents($row, index, item);
+        </div>
+        <div class="edit-mode" style="display:none"></div>
+      </div>`);
+      if (!this.toggle) $row.find(".anima-switch").remove();
+      $row.find(".regex-toggle").on("change", e => {
+        item.enabled = $(e.target).prop("checked"); this.onSave(this.getData()); this.render();
+      });
+      $row.find(".btn-del").on("click", () => {
+        if (!confirm("确定删除此规则吗？")) return;
+        const list = this.getData(); list.splice(index, 1); this.onSave(list); this.render();
+      });
+      $row.find(".btn-edit").on("click", () => {
+        const form = createRuleForm(rule);
+        const $edit = $row.find(".edit-mode").empty().append(form.$el);
+        const $actions = $('<div class="rule-edit-actions"><button class="anima-btn primary small btn-save">保存规则</button><button class="anima-btn secondary small btn-cancel">取消</button></div>');
+        $edit.append($actions);
+        $row.find(".view-mode").hide(); $edit.css("display", "flex");
+        $actions.find(".btn-cancel").on("click", () => this.render());
+        $actions.find(".btn-save").on("click", () => {
+          try {
+            const next = form.read();
+            // Preserve GC's content field and every unknown setting on the record.
+            item[this.field] = next.regex;
+            if (next.type !== undefined) item.type = next.type;
+            this.onSave(this.getData()); this.render();
+          } catch (error) { form.showError(error); }
+        });
+      });
       listEl.append($row);
     });
-
     this._initSortable();
   }
 
-  /**
-   * 绑定单行事件 (内部使用)
-   */
-  _bindItemEvents($row, index, item) {
-    $row.find(".regex-toggle").on("change", (e) => {
-      const list = this.getData();
-      // 获取当前勾选状态并保存
-      list[index].enabled = $(e.target).prop("checked");
-      this.onSave(list);
-      // 重新渲染，以刷新样式 (比如被禁用时的文本删除线)
-      this.render();
-    });
-
-    // 1. 删除
-    $row.find(".btn-del").on("click", () => {
-      if (confirm("确定删除此规则吗？")) {
-        const list = this.getData();
-        list.splice(index, 1);
-        this.onSave(list); // 通知外部保存
-        this.render();
-      }
-    });
-
-    // 2. 进入编辑
-    $row.find(".btn-edit").on("click", () => {
-      $row.find(".view-mode").hide();
-      $row.find(".edit-mode").css("display", "flex");
-      $row.find(".edit-type").val(item.type);
-    });
-
-    // 3. 取消编辑
-    $row.find(".btn-cancel").on("click", () => {
-      $row.find(".edit-mode").hide();
-      $row.find(".view-mode").css("display", "flex");
-      // 重置输入框内容防止脏数据残留
-      $row.find(".edit-input").val(item.regex);
-    });
-
-    // 4. 保存编辑
-    $row.find(".btn-save").on("click", () => {
-      const newType = $row.find(".edit-type").val();
-      const newStr = $row.find(".edit-input").val();
-
-      if (!newStr.trim()) {
-        // 如果有 toastr 可以用 toastr，否则用 alert
-        if (window.toastr) toastr.warning("正则不能为空");
-        else alert("正则不能为空");
-        return;
-      }
-
-      const list = this.getData();
-      list[index].type = newType;
-      list[index].regex = newStr;
-
-      this.onSave(list);
-      this.render();
-    });
-  }
-
-  /**
-   * 初始化拖拽排序
-   */
   _initSortable() {
     const listEl = this.$container;
-    const self = this;
-
-    // 检查是否已经初始化过，防止重复绑定
-    if (listEl.data("ui-sortable")) {
-      listEl.sortable("destroy");
-    }
-
-    listEl.sortable({
-      handle: ".anima-drag-handle",
-      placeholder: "ui-state-highlight", // 需要确保 CSS 有这个类，或者沿用你原有的样式
-      stop: function (event, ui) {
-        const newData = [];
-        const currentData = self.getData();
-
-        // 根据 DOM 顺序重组数组
-        listEl.children().each(function () {
-          const oldIdx = $(this).data("idx");
-          // 必须做一个浅拷贝或者直接引用，防止索引错乱
-          if (currentData[oldIdx]) {
-            newData.push(currentData[oldIdx]);
-          }
-        });
-
-        // 更新数据源
-        // 注意：这里我们不能直接修改 this.getData() 返回的数组引用，
-        // 而是通过 onSave 传回一个新数组
-        self.onSave(newData);
-
-        // 重新渲染以修正 DOM 上的 data-idx
-        self.render();
+    listEl.sortable({ handle: ".anima-drag-handle", placeholder: "ui-state-highlight",
+      stop: () => {
+        const current = this.getData();
+        const ordered = listEl.children("[data-idx]").map((_, el) => current[$(el).data("idx")]).get();
+        this.onSave(ordered); this.render();
       },
     });
   }
 
-  /**
-   * 添加新规则的辅助方法 (供外部调用)
-   */
   addRule(regexStr, type) {
     const list = this.getData();
-    list.push({ regex: regexStr, type: type, enabled: true });
-    this.onSave(list);
-    this.render();
+    list.push({ [this.field]: regexStr, type, ...(this.toggle ? { enabled: true } : {}) });
+    this.onSave(list); this.render();
   }
 
-  /**
-   * 工具函数
-   */
-  escapeHtml(text) {
-    if (!text) return text;
-    return text
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
+  openAddModal() {
+    const modalId = `${this.containerId}-rule-modal`;
+    $(`#${modalId}`).remove();
+    const $modal = $(getRegexModalHTML()).attr("id", modalId);
+    const form = createRuleForm();
+    $modal.find(".anima-modal-body").append(form.$el);
+    const close = () => $modal.remove();
+    $modal.find(".anima-close-regex-modal").on("click", close);
+    $modal.on("click", e => { if (e.target === $modal[0]) close(); });
+    $modal.on("keydown", e => { if (e.key === "Escape") { e.stopPropagation(); close(); } });
+    $modal.find(".rule-confirm").on("click", () => {
+      try { const rule = form.read(); this.addRule(rule.regex, rule.type); close(); }
+      catch (error) { form.showError(error); }
+    });
+    $("body").append($modal);
+    $modal.find(".rule-operation").trigger("focus");
   }
 }
 
-/**
- * 获取通用的“添加正则”模态框 HTML
- * 只需要在页面任意位置插入一次即可
- */
 export function getRegexModalHTML() {
-  return `
-    <div id="anima-regex-input-modal" class="anima-modal hidden">
-        <div class="anima-modal-content" style="max-width: 500px;">
-            <div class="anima-modal-header">
-                <h3>添加正则规则</h3>
-                <span class="anima-close-regex-modal" style="cursor:pointer;">&times;</span>
-            </div>
-            <div class="anima-modal-body">
-                <div class="anima-input-group" style="flex-direction: column;">
-                    <label>规则类型</label>
-                    <select id="anima_new_regex_type" class="anima-select">
-                        <option value="extract">🔍 提取</option>
-                        <option value="exclude">🚫 排除</option>
-                    </select>
-                </div>
-                <div class="anima-input-group" style="flex-direction: column;">
-                    <label>正则表达式</label>
-                    <input type="text" id="anima_new_regex_str" class="anima-input" placeholder="/<content>(.*?)<\\/content>/gs">
-                </div>
-            </div>
-            <div class="anima-modal-footer">
-                <button id="anima_btn_confirm_add_regex" class="anima-btn primary">确定</button>
-                <button class="anima-close-regex-modal anima-btn secondary">取消</button>
-            </div>
-        </div>
-    </div>`;
+  return `<div class="anima-modal anima-rule-modal">
+    <div class="anima-modal-content" role="dialog" aria-modal="true" aria-label="添加规则">
+      <div class="anima-modal-header"><h3>添加规则</h3><button class="anima-close-regex-modal rule-close" aria-label="关闭">&times;</button></div>
+      <div class="anima-modal-body"></div>
+      <div class="anima-modal-footer"><button class="anima-btn secondary anima-close-regex-modal">取消</button><button class="anima-btn primary rule-confirm">添加规则</button></div>
+    </div></div>`;
 }

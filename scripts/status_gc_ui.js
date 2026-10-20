@@ -1,3 +1,4 @@
+import { RegexListComponent } from "./regex_ui.js";
 import {
   previewStatusPayload,
   getStatusSettings,
@@ -138,67 +139,16 @@ export function openGCManagementModal() {
   // ==========================================
   // 2. 渲染函数：正则列表 (已修复样式与水平对齐，新增拖拽)
   // ==========================================
-  const renderGCRegex = () => {
-    const $container = $("#gc_regex_list_container");
-    $container.empty();
-
-    if (gcSettings.regex_list.length === 0) {
-      $container.html(
-        '<div style="text-align:center; color:#666; font-size:12px; padding:10px; border:1px dashed #555;">暂无专属正则</div>',
-      );
-      return;
-    }
-
-    gcSettings.regex_list.forEach((rule, idx) => {
-      const $item = $(`
-                <div class="anima-regex-item gc-regex-item" data-idx="${idx}" style="display: flex; flex-direction: row; flex-wrap: nowrap; align-items: center; gap: 8px; width: 100%; padding: 6px 10px; background: rgba(0,0,0,0.2); border: 1px solid var(--anima-border, #4b5563); border-radius: 4px; box-sizing: border-box;">
-                    <i class="fa-solid fa-bars anima-drag-handle" title="拖动排序" style="cursor:grab; color:#888; flex-shrink: 0;"></i>
-                    
-                    <select class="anima-select gc-regex-type" style="width: 100px; margin: 0; box-sizing: border-box; background: rgba(0,0,0,0.3); color: #ddd; border: 1px solid #555; border-radius: 4px; padding: 4px; flex-shrink: 0;">
-                        <option value="extract" ${rule.type === "extract" ? "selected" : ""}>提取</option>
-                        <option value="exclude" ${rule.type === "exclude" ? "selected" : ""}>排除</option>
-                    </select>
-                    
-                    <textarea class="anima-input anima-textarea gc-regex-content" rows="1" spellcheck="false" aria-label="正则表达式" placeholder="输入正则表达式..." style="flex: 1; min-width: 0; margin: 0; box-sizing: border-box; background: rgba(0,0,0,0.3); color: #ddd; border: 1px solid #555; border-radius: 4px; padding: 4px 8px;">${escapeHtml(rule.content || "")}</textarea>
-                    
-                    <button class="anima-btn danger small gc-regex-delete" title="删除" aria-label="删除规则" style="width: 32px; height: 32px; padding: 0; margin: 0; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer;">
-                        <i class="fa-solid fa-trash"></i>
-                    </button>
-                </div>
-            `);
-
-      $item.find(".gc-regex-type").on("change", function () {
-        rule.type = $(this).val();
-        renderGCPrompts();
-      });
-      $item.find(".gc-regex-content").on("input", function () {
-        rule.content = $(this).val();
-        renderGCPrompts();
-      });
-      $item.find(".gc-regex-delete").on("click", () => {
-        gcSettings.regex_list.splice(idx, 1);
-        renderGCRegex();
-        renderGCPrompts();
-      });
-      $container.append($item);
-    });
-
-    // 挂载拖拽排序
-    $container.sortable({
-      handle: ".anima-drag-handle",
-      placeholder: "ui-state-highlight",
-      stop: function () {
-        const newRegex = [];
-        $container.children().each(function () {
-          const oldIdx = $(this).data("idx");
-          if (gcSettings.regex_list[oldIdx])
-            newRegex.push(gcSettings.regex_list[oldIdx]);
-        });
-        gcSettings.regex_list = newRegex;
-        renderGCRegex();
-      },
-    });
-  };
+  const gcRegexComponent = new RegexListComponent(
+    "gc_regex_list_container",
+    () => gcSettings.regex_list || [],
+    list => {
+      gcSettings.regex_list = list;
+      renderGCPrompts();
+    },
+    { field: "content", toggle: false },
+  );
+  const renderGCRegex = () => gcRegexComponent.render();
 
   // ==========================================
   // 3. 数据拉取与清洗逻辑 (完美复刻主面板逻辑)
@@ -573,6 +523,7 @@ export function openGCManagementModal() {
 
   // 关闭逻辑
   const closeModal = () => {
+    $("#gc_regex_list_container-rule-modal").remove();
     $(`#${modalId}`).addClass("hidden");
     setTimeout(() => {
       $(`#${modalId}`).remove();
@@ -656,8 +607,7 @@ export function openGCManagementModal() {
 
   // 添加按钮
   $("#btn-gc-add-regex").on("click", () => {
-    gcSettings.regex_list.push({ type: "extract", content: "" });
-    renderGCRegex();
+    gcRegexComponent.openAddModal();
   });
 
   $("#btn-gc-add-prompt").on("click", () => {

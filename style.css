@@ -1185,3 +1185,174 @@
 .anima-file-item:last-child {
   border-bottom: none;
 }
+
+/* Shared tag editor; scoped so prompt rule rows keep their existing layout. */
+.anima-regex-item.is-row .view-mode {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: 10px;
+  min-width: 0;
+}
+.anima-regex-item.is-row .anima-drag-handle {
+  cursor: grab;
+  color: #888;
+}
+.anima-regex-item.is-row .regex-type-badge {
+  flex-shrink: 0;
+  text-align: center;
+}
+.anima-regex-item.is-row .regex-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.anima-regex-item.is-row .regex-actions .anima-switch {
+  margin: 0;
+  flex: 0 0 44px;
+}
+.anima-regex-item.is-row .regex-text {
+  color: #ddd;
+}
+.anima-regex-item.is-row .rule-disabled {
+  text-decoration: line-through;
+  opacity: .5;
+}
+.anima-regex-item.is-row .edit-mode {
+  width: 100%;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+}
+.anima-rule-form {
+  min-width: 0;
+  width: 100%;
+  font-family: inherit;
+  color: #ddd;
+  box-sizing: border-box;
+}
+.anima-rule-form [hidden] {
+  display: none !important;
+}
+.anima-rule-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+  font-size: 13px;
+  color: #cbd5e1;
+}
+.anima-rule-form .rule-tags, .anima-rule-form .rule-custom {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.anima-rule-form .rule-delimiters {
+  display: grid;
+  grid-template-columns: minmax(0,1fr) minmax(0,1fr);
+  gap: 12px;
+}
+.anima-rule-form .anima-input, .anima-rule-form .anima-select,
+#anima-overlay .anima-rule-form .anima-input, #anima-overlay .anima-rule-form .anima-select {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  min-height: 42px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid #475569;
+  border-radius: 6px;
+  background: #141d2a;
+  color: #f1f5f9;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.anima-rule-form .anima-input:focus, .anima-rule-form .anima-select:focus {
+  outline: 2px solid #818cf8;
+  outline-offset: 1px;
+}
+.anima-rule-form .edit-input, #anima-overlay .anima-regex-item.is-row .anima-rule-form .edit-input {
+  width: 100%;
+  min-height: 100px;
+  height: auto;
+  resize: vertical;
+  font-family: monospace;
+}
+.anima-rule-form .rule-help {
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 1.65;
+  margin: 0;
+}
+.anima-rule-form .rule-mode-toggle {
+  background: transparent;
+  border: 0;
+  color: #a5b4fc;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 10px 0;
+  min-height: 40px;
+  text-align: left;
+}
+.anima-rule-form .rule-error {
+  color: #fca5a5;
+  font-size: 13px;
+  padding-top: 6px;
+}
+.anima-regex-item.is-row .rule-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.anima-regex-list .rule-empty, #gc_regex_list_container .rule-empty {
+  text-align: center;
+  color: #94a3b8;
+  font-size: 12px;
+  padding: 10px;
+}
+.anima-rule-modal {
+  z-index: 21000;
+  font-family: system-ui,sans-serif;
+  color: #e2e8f0;
+}
+.anima-rule-modal .anima-modal-content {
+  width: calc(100% - 24px);
+  max-width: 500px;
+  max-height: calc(100dvh - 24px);
+  padding-bottom: 0;
+}
+.anima-rule-modal .anima-modal-header h3 {
+  margin: 0;
+  font-size: 18px;
+}
+.anima-rule-modal .rule-close {
+  border: 0;
+  background: transparent;
+  color: #cbd5e1;
+  cursor: pointer;
+  font-size: 26px;
+  min-width: 40px;
+  min-height: 40px;
+}
+.anima-rule-modal .anima-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.anima-rule-modal .anima-btn {
+  min-height: 42px;
+}
+@media (max-width: 768px) {
+  .anima-rule-form .rule-delimiters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .anima-rule-form .anima-input, .anima-rule-form .anima-select,
+  #anima-overlay .anima-rule-form .anima-input, #anima-overlay .anima-rule-form .anima-select {
+    font-size: 16px;
+  }
+  .anima-rule-modal .anima-modal-header, .anima-rule-modal .anima-modal-body, .anima-rule-modal .anima-modal-footer {
+    padding: 16px;
+  }
+}
