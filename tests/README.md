@@ -47,3 +47,22 @@ storage field at the persistence boundary. Host reads/writes are captured in
 memory. It does not exercise physical touch dragging or a logged-in profile.
 
 Set `ANIMA_CHROMIUM_PATH` when using a separately installed Chromium executable.
+
+## Manual status mode and ending-tag compatibility
+
+`status-update-mode.test.cjs` runs the real normal/stopped status handlers,
+manual sync path and stopped-reply watcher with host doubles. It checks legacy
+countdown/automatic behavior, manual visibility-only behavior, configured
+literal ending tags, post-trim rendering, wrong chat/floor/swipe, stale events
+and successful/failed/canceled manual sync.
+
+Run `status-mode.browser.cjs` with the same browser environment variables as
+above plus `ANIMA_AUTOSTOP_SCRIPT=/path/to/original-auto-stop.json`. The supplied
+script is read unchanged and is not distributed or patched by the extension.
+The check uses actual settings/save/visibility/floating-button code and the
+entire original script at 390/1280px. It covers mode save/reload, cancellation
+of an existing countdown, zero automatic requests after 6.5 seconds, configured
+end-tag detection after cutting, copied swipe variables, red threshold,
+dragging, manual click, loading, success and cancellation.
+Host storage and API responses are doubles; this does not confirm authenticated
+SillyTavern integration or actual model behavior.

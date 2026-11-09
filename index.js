@@ -1,3 +1,4 @@
+import { createStoppedStatusWatcher } from "./scripts/status_update_mode.js";
 // 引入各个页面的管理器
 import { initApiSettings } from "./scripts/api.js";
 import { initStatusSettings, refreshStatusPanel } from "./scripts/status.js";
@@ -31,6 +32,9 @@ import {
   getStatusSettings,
   getStatusFromMessage,
   handleStatusUpdate,
+  handleStoppedStatusReady,
+  getStatusReplySnapshot,
+  clearPendingStoppedReply,
   cancelStatusTimer,
   initStatusMacro,
   handleGreetingSwipe,
@@ -348,6 +352,12 @@ import { defaultBeautifyTemplate } from "./config/default_beautify_template.js";
 
     const context = SillyTavern.getContext();
     if (context && context.eventSource) {
+      const stoppedStatusWatcher = createStoppedStatusWatcher({
+        getSnapshot: getStatusReplySnapshot,
+        getSettings: getStatusSettings,
+        onReady: handleStoppedStatusReady,
+      });
+      context.eventSource.on("message_updated", () => stoppedStatusWatcher.render());
       // 🟢 1. 确保 debounceTimer 定义在这一层，让下面所有事件都能访问到
       let debounceTimer = null;
       let isGenerationActive = false;
@@ -382,6 +392,8 @@ import { defaultBeautifyTemplate } from "./config/default_beautify_template.js";
 
       // --- 聊天切换事件 ---
       context.eventSource.on("chat_id_changed", async (chatId) => {
+        stoppedStatusWatcher.reset();
+        clearPendingStoppedReply();
         console.log("[Anima] Chat Changed to:", chatId || "None (Closed)");
         isGreetingSyncPending = true;
         // 1. 既然聊天变了（无论是换人还是关闭），RAG 缓存和配置必须“全量刷新”
@@ -847,6 +859,7 @@ import { defaultBeautifyTemplate } from "./config/default_beautify_template.js";
 
       // --- AI 消息上屏 ---
       context.eventSource.on("character_message_rendered", (messageId) => {
+        stoppedStatusWatcher.render();
         if (getIsSummarizing()) return;
         triggerAutomationCheck("character_message_rendered", 1000);
         if (Number(messageId) === 0 && isGreetingSyncPending) {
@@ -922,6 +935,8 @@ import { defaultBeautifyTemplate } from "./config/default_beautify_template.js";
         if (isDryRun) {
           return;
         }
+        stoppedStatusWatcher.start();
+        clearPendingStoppedReply();
         isGenerationActive = true;
 
         try {
@@ -992,6 +1007,7 @@ import { defaultBeautifyTemplate } from "./config/default_beautify_template.js";
       });
 
       context.eventSource.on("generation_stopped", () => {
+        stoppedStatusWatcher.stop();
         console.log("[Anima] 🛑 用户手动取消了生成 (Generation Stopped)");
         wasGenerationStopped = true;
         isGenerationActive = false;
@@ -1002,6 +1018,7 @@ import { defaultBeautifyTemplate } from "./config/default_beautify_template.js";
       // 建议：与其监听 character_message_rendered (可能会在编辑消息时多次触发)
       // 不如重点监听 generation_ended，这是 AI 回复完成的确切时间点
       context.eventSource.on("generation_ended", async () => {
+        stoppedStatusWatcher.end();
         if (typeof setSwipeState === "function") {
           setSwipeState(false);
         }
@@ -1203,6 +1220,7 @@ import { defaultBeautifyTemplate } from "./config/default_beautify_template.js";
       });
 
       context.eventSource.on("message_edited", (payload) => {
+        stoppedStatusWatcher.render();
         // payload 通常是 messageId
         console.log("[Anima] 检测到消息编辑，ID:", payload);
         // 未来可以在这里调用 status_logic 里的 checkAndShowRefreshButton(payload)

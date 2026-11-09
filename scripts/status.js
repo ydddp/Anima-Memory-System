@@ -15,6 +15,8 @@ import {
   renderAnimaTemplate,
   executeGCProcess,
   getTargetAIFloor,
+  cancelStatusTimer,
+  isPendingStoppedReply,
 } from "./status_logic.js";
 import { validateStatusData, createAutoNumberSchema } from "./status_zod.js";
 import {
@@ -501,7 +503,7 @@ export function initStatusSettings() {
             <div class="anima-flex-row" style="align-items: center; margin-bottom: 10px;">
                 <div class="anima-label-group" style="flex: 1;">
                     <span class="anima-label-text">结束标签检测</span>
-                    <span class="anima-desc-inline">当主API回复包含此字符串时，视为回复完整。留空则默认检测结束。</span>
+                    <span class="anima-desc-inline">回复末尾匹配此标签时，视为回复完整。多个用逗号分隔，留空使用默认检测。</span>
                 </div>
                 <div style="flex: 1;">
                     <input type="text" id="status_stop_sequence" class="anima-input" 
@@ -518,6 +520,17 @@ export function initStatusSettings() {
                     <input type="checkbox" id="status_panel_enabled" ${updateSettings.panel_enabled ? "checked" : ""}>
                     <span class="anima-slider round"></span>
                 </label>
+            </div>
+
+            <div class="anima-flex-row" style="align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 15px;">
+                <div class="anima-label-group" style="flex: 1 1 180px;">
+                    <label class="anima-label-text" for="status_update_mode">面板更新模式</label>
+                    <span class="anima-desc-inline">手动模式不弹倒计时，点击悬浮球才更新。自动截断时，请在上方填入截断标记。关闭面板后仍自动更新。</span>
+                </div>
+                <select id="status_update_mode" class="anima-select" style="flex: 1 1 200px; min-width: 0; max-width: 100%;" ${updateSettings.panel_enabled ? "" : "disabled"}>
+                    <option value="original" ${updateSettings.update_mode !== "manual" ? "selected" : ""}>原有模式</option>
+                    <option value="manual" ${updateSettings.update_mode === "manual" ? "selected" : ""}>仅悬浮球手动更新</option>
+                </select>
             </div>
 
             <div class="anima-flex-row" style="align-items: center; margin-bottom: 15px;">
@@ -1039,6 +1052,7 @@ export function refreshStatusPanel() {
         });
 
         const hasOwnData =
+          !isPendingStoppedReply(targetAiMsg) &&
           currentVars &&
           currentVars.anima_data &&
           Object.keys(currentVars.anima_data).length > 0;
@@ -3601,6 +3615,8 @@ function initUpdateManagementModule() {
   // 2. 开关逻辑：保持即时生效（因为涉及到 UI 刷新）
   $("#status_panel_enabled").on("change", function () {
     settings.panel_enabled = $(this).prop("checked");
+    $("#status_update_mode").prop("disabled", !settings.panel_enabled);
+    if (settings.panel_enabled && settings.update_mode === "manual") cancelStatusTimer(true);
 
     // 开关还是建议即时保存，防止用户点了开关没点保存按钮导致 UI 和数据不一致
     saveStatusSettings(currentSettings);
@@ -3612,6 +3628,13 @@ function initUpdateManagementModule() {
       const statusText = settings.panel_enabled ? "启用" : "禁用";
       toastr.info(`状态更新面板已${statusText}`);
     }
+  });
+
+  $("#status_update_mode").on("change", function () {
+    settings.update_mode = $(this).val() === "manual" ? "manual" : "original";
+    if (settings.panel_enabled && settings.update_mode === "manual") cancelStatusTimer(true);
+    saveStatusSettings(currentSettings);
+    refreshStatusPanel();
   });
 
   // 3. 【新增】绑定保存按钮

@@ -1,3 +1,4 @@
+import { isManualStatusMode, matchesStatusReply, matchesConfiguredStatusEnd } from "./status_update_mode.js";
 import { validateStatusData } from "./status_zod.js";
 import {
   getContextData,
@@ -792,6 +793,43 @@ export async function triggerStatusUpdate(targetMsgId, options = {}) {
  * 【UI 专用】手动同步触发器
  * 逻辑：找到当前最新楼层，强制执行一次 update
  */
+let pendingStoppedReply = null;
+
+export function clearPendingStoppedReply() {
+  pendingStoppedReply = null;
+}
+
+export function isPendingStoppedReply(message) {
+  return pendingStoppedReply !== null && isManualStatusMode(getStatusSettings()) &&
+    matchesStatusReply(pendingStoppedReply, SillyTavern.getContext(), message);
+}
+
+export function getStatusReplySnapshot() {
+  const context = SillyTavern.getContext();
+  const message = window.TavernHelper?.getChatMessages(-1)?.[0];
+  return {
+    chatId: context.chatId,
+    messageId: message?.message_id,
+    swipeId: context.chat?.[message?.message_id]?.swipe_id ?? 0,
+    role: message?.role,
+    text: message?.message ?? "",
+  };
+}
+
+export function handleStoppedStatusReady(detail) {
+  const lastMsg = window.TavernHelper?.getChatMessages(-1)?.[0];
+  if (!isManualStatusMode(getStatusSettings()) ||
+      !matchesConfiguredStatusEnd(detail?.text, getStatusSettings()) ||
+      !matchesStatusReply(detail, SillyTavern.getContext(), lastMsg)) return;
+  cancelStatusTimer(true);
+  // A stopped swipe may still carry copied variables. Keep that data intact,
+  // but show it as pending until the user successfully syncs this exact reply.
+  pendingStoppedReply = detail;
+  window.dispatchEvent(new CustomEvent("anima:status_updated", {
+    detail: { reason: "stopped_reply_ready" },
+  }));
+}
+
 export async function triggerManualSync(options = {}) {
   const { signal } = options || {};
   const targetMsg = getTargetAIFloor();
@@ -807,7 +845,15 @@ export async function triggerManualSync(options = {}) {
   if (window.toastr)
     window.toastr.info(`正在同步状态... (Target: #${targetId})`);
 
-  return await triggerStatusUpdate(targetId, { signal });
+  const pending = pendingStoppedReply;
+  const succeeded = await triggerStatusUpdate(targetId, { signal });
+  if (succeeded && pending && pendingStoppedReply === pending && isPendingStoppedReply(targetMsg)) {
+    clearPendingStoppedReply();
+    window.dispatchEvent(new CustomEvent("anima:status_updated", {
+      detail: { reason: "check_visibility" },
+    }));
+  }
+  return succeeded;
 }
 
 // ==========================================
@@ -1345,6 +1391,9 @@ export async function handleStatusUpdate() {
       }),
     );
   }
+
+  // Manual mode only refreshes the cloud button, never starts a countdown/API.
+  if (isManualStatusMode(settings)) return;
 
   // 4. 定义执行动作
   const executeUpdate = async () => {
