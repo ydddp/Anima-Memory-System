@@ -81,7 +81,12 @@ const cases = [
     /JSON.*(不完整|截断|格式)/);
  }],
  ['GC rejects incomplete outer object rather than accepting nested update',()=>{
-   assert.throws(()=>c.extractJsonResult('{"updates":{"hp":10}'),/JSON.*(不完整|截断|格式)/);
+   for (const raw of [
+     '{"updates":{"hp":10}',
+     '<thinking>分析结束。</thinking>\n状态更新：\n{\n  "updates": {"hp":10}',
+   ]) {
+     assert.throws(()=>c.extractJsonResult(raw),/JSON.*(不完整|截断|格式)/);
+   }
  }],
  ['summary rejects truncated outer object with a complete tags child',()=>{
    assert.throws(()=>c.summaries('{"summaries":[{"summary":"第一段","tags":{"vibe":"Angst"}}, {"summary":"第二'),/JSON.*(不完整|截断|格式)/);
@@ -110,6 +115,25 @@ const cases = [
  ['closed reasoning blocks cannot supply or hide the final JSON result',()=>{
    const raw='<thinking>草稿 {"updates":{"hp":1}}，注意未闭合符号 [</thinking>\n{"updates":{"hp":10}}';
    assert.deepEqual(plain(c.extractJsonResult(raw)),[{updates:{hp:10}}]);
+ }],
+ ['JSON after a closed thinking block still reaches quote repair',()=>{
+   const text='她说："按下 [ 这个键"。';
+   const raw='<thinking>分析结束。</thinking>\n状态更新：\n'+
+     JSON.stringify({updates:{note:text,hp:10}}).replaceAll('\\"','"');
+   assert.deepEqual(plain(c.extractJsonResult(raw)),[{updates:{note:text,hp:10}}]);
+ }],
+ ['reasoning without a final answer cannot write draft JSON or expose it in the status toast',()=>{
+   const draft='私密测试内容\n'+wrap('{"updates":{"hp":1}}');
+   for (const [raw,reason] of [
+     ['<thinking>'+draft,/思考标签未闭合/],
+     ['<think>'+draft+'</think>\n<thinking>'+draft,/思考标签未闭合/],
+     ['<thinking>'+draft+'</thinking>\n',/没有正文/],
+   ]) {
+     const safeDiagnostic=e=>reason.test(e.publicMessage) && e.publicMessage.includes(String(raw.length)) &&
+       !e.publicMessage.includes('私密测试内容');
+     assert.throws(()=>c.extractJsonResult(raw),safeDiagnostic);
+     assert.throws(()=>c.summaries(raw),safeDiagnostic);
+   }
  }],
  ['literal reasoning tags inside summary content are preserved',()=>{
    const text='记录中的原文是 <thinking>不要删除这段</thinking>。';

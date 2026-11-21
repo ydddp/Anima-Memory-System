@@ -333,8 +333,14 @@ export function extractJsonResult(text) {
   // Reasoning may contain draft objects and unmatched prose brackets.
   // Strip only leading blocks: tags inside JSON strings are literal content.
   // Keep the original response for diagnostics.
-  const output = text.replace(/^(?:\s*<(think|thinking)\b[^>]*>[\s\S]*?<\/\1\s*>)+/i, "");
+  const output = text.replace(/^(?:\s*<(think|thinking)(?=[\s>])[^>]*>[\s\S]*?<\/\1\s*>)+/i, "");
   const trimmed = output.trim();
+  if (/^<(?:think|thinking)(?=[\s>])[^>]*>/i.test(trimmed)) {
+    throw modelJsonError(text, "模型返回的思考标签未闭合，无法确认正文，未写入数据");
+  }
+  if (!trimmed && output !== text) {
+    throw modelJsonError(text, "模型只返回了思考内容，没有正文，未写入数据");
+  }
   if (/^[\[{]/.test(trimmed)) {
     const direct = parseModelJsonCandidate(trimmed);
     if (direct) return direct;
@@ -352,14 +358,21 @@ export function extractJsonResult(text) {
     if (output[i] !== "{" && output[i] !== "[") continue;
     const looksLikeJson = /^(?:\{\s*(?:["}]|$)|\[\s*(?:[\[{"\]\d-]|true\b|false\b|null\b|$))/.test(output.slice(i));
     const candidate = extractBalancedString(output, i);
-    if (!candidate) {
-      if (looksLikeJson) {
-        throw modelJsonError(text, "JSON 内容不完整或被截断，未写入数据");
-      }
-      continue;
-    }
-    const result = parseModelJsonCandidate(candidate);
+    const result = candidate && parseModelJsonCandidate(candidate);
     if (result) return result;
+    if (looksLikeJson) {
+      // A bare quote can make a literal bracket look structural. Retry the
+      // same root with the quote-aware scanner used for fenced JSON.
+      const repairedBoundary = extractBalancedString(output, i, true);
+      if (repairedBoundary && repairedBoundary !== candidate) {
+        const repaired = parseModelJsonCandidate(repairedBoundary);
+        if (repaired) return repaired;
+      }
+      if (!candidate) {
+        throw modelJsonError(text, "JSON 正文不完整：结构未闭合或括号不匹配，未写入数据");
+      }
+    }
+    if (!candidate) continue;
     // Skip the entire failed candidate, including all its nested objects.
     invalidRoot ||= looksLikeJson;
     i += candidate.length - 1;
@@ -547,7 +560,8 @@ function extractBalancedString(text, startIndex, repairQuotes = false) {
 }
 
 function modelJsonError(text, reason) {
-  return new Error(`${reason}。原文长度：${text.length} 字符。API返回片段:\n开头：\n${text.slice(0, 400)}\n末尾：\n${text.slice(-400)}`);
+  const publicMessage = `${reason}。原文长度：${text.length} 字符。`;
+  return Object.assign(new Error(`${publicMessage}API返回片段:\n开头：\n${text.slice(0, 400)}\n末尾：\n${text.slice(-400)}`), { publicMessage });
 }
 
 export function extractSummaryJsonResult(text) {

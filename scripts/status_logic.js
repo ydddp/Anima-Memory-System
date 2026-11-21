@@ -780,7 +780,7 @@ export async function triggerStatusUpdate(targetMsgId, options = {}) {
     console.error("[Anima] Update failed (Exception):", e);
 
     // 显示更友好的错误提示 (e.message 现在会包含 api.js 传递的状态码)
-    showStatusErrorToast("状态更新异常: " + e.message);
+    showStatusErrorToast("状态更新异常: " + (e.publicMessage ?? e.message));
 
     forceRefreshUI();
     return false; // ❌ 终止：报错不写入
