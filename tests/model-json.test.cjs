@@ -56,6 +56,30 @@ const cases = [
    const raw='{"updates":{"note":"她说："别走"。","nested":{"hp":10}}}';
    assert.deepEqual(plain(c.extractJsonResult(raw)),[{updates:{note:'她说："别走"。',nested:{hp:10}}}]);
  }],
+ ['status quote repair keeps comma after inner dialogue quote',()=>{
+   for (const updates of [
+     {note:'她说："别走", 然后关上门。',nested:{hp:10}},
+     {notes:['她说："别走", 然后关上门。','同伴',42,{hp:10}]},
+     {notes:['她说："别走", 然后关上门。',42,'同伴']},
+     {note:'她说："别走": 后来关上门。'},
+   ]) {
+     const raw=JSON.stringify({updates}).replaceAll('\\"','"');
+     assert.deepEqual(plain(c.extractJsonResult(raw)),[{updates}]);
+   }
+ }],
+ ['fenced JSON preserves literal triple backticks inside a string',()=>{
+   for (const note of ['日志里原样保留了 ```json 这个标记。','她说："别看 ```json {草稿}", 然后合上日志。']) {
+     const updates={note,hp:10};
+     const raw=JSON.stringify({updates}).replaceAll('\\"','"');
+     for (const wrapped of [wrap(raw),'说明：```json '+raw+'``` 已完成。','```'+raw+'```']) {
+       assert.deepEqual(plain(c.extractJsonResult(wrapped)),[{updates}]);
+     }
+   }
+ }],
+ ['fence markers and an intact child do not make a truncated root valid',()=>{
+   assert.throws(()=>c.extractJsonResult(wrap('{"updates":{"hp":10,"note":"日志里有 ```json 但没有结束')),
+    /JSON.*(不完整|截断|格式)/);
+ }],
  ['GC rejects incomplete outer object rather than accepting nested update',()=>{
    assert.throws(()=>c.extractJsonResult('{"updates":{"hp":10}'),/JSON.*(不完整|截断|格式)/);
  }],
@@ -118,7 +142,9 @@ const cases = [
    assert.throws(()=>c.summaries('{"summaries":[{"summary":"完整"},{"tags":{"vibe":"Angst"}}]}'),/总结.*(字段|结构)/);
  }],
  ['missing comma is rejected instead of silently changing structure',()=>{
-   assert.throws(()=>c.extractJsonResult('{"updates":{"hp":10 "mp":20}}'),/JSON.*格式/);
+   for (const raw of ['{"updates":{"hp":10 "mp":20}}','{"updates":{"notes":["北门" "南门"]}}']) {
+     assert.throws(()=>c.extractJsonResult(raw),/JSON.*格式/);
+   }
  }],
 ];
 for(const [name,fn] of cases)test(name,fn);

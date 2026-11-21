@@ -339,8 +339,7 @@ export function extractJsonResult(text) {
     const direct = parseModelJsonCandidate(trimmed);
     if (direct) return direct;
   }
-  const fenced = [...output.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)]
-    .map((match) => match[1].trim()).filter((body) => /^[\[{]/.test(body));
+  const fenced = extractFencedJsonBodies(output);
   if (fenced.length) {
     for (const body of fenced) {
       const result = parseModelJsonCandidate(body);
@@ -381,13 +380,14 @@ function parseModelJsonCandidate(candidate) {
       try {
         repaired = jsonrepair(candidate);
       } catch {
-        // Some dialogue contains literal braces, which jsonrepair can mistake
-        // for structure after a bare quote. Escape only non-terminal quotes.
-        repaired = escapeModelJsonStringQuotes(candidate);
+        // Try the context-aware quote repair below.
       }
       // Only permit escaping existing quotes/control characters. Reject any
       // repair that invents a value, closes a missing bracket, or drops text.
-      if (!isSafeModelJsonRepair(candidate, repaired)) return null;
+      if (!repaired || !isSafeModelJsonRepair(candidate, repaired)) {
+        repaired = escapeModelJsonStringQuotes(candidate);
+        if (!isSafeModelJsonRepair(candidate, repaired)) return null;
+      }
       parsed = JSON.parse(repaired);
       console.warn("[Anima] 已修复模型 JSON 字符串转义；正文和结构保持完整。");
     } catch {
@@ -400,24 +400,29 @@ function parseModelJsonCandidate(candidate) {
 }
 
 function escapeModelJsonStringQuotes(text) {
-  let inString = false;
+  const stack = [];
+  let stringStart = -1;
   let escaped = false;
   let result = "";
   const controls = {"\n": "n", "\r": "r", "\t": "t", "\b": "b", "\f": "f"};
   for (let i = 0; i < text.length; i++) {
     const char = text[i];
-    if (!inString) {
-      if (char === '"') inString = true;
+    if (stringStart < 0) {
+      if (char === '"') {
+        stringStart = i;
+      } else if (char === "{" || char === "[") {
+        stack.push(char);
+      } else if (char === "}" || char === "]") {
+        stack.pop();
+      }
       result += char;
       continue;
     }
     if (escaped) { escaped = false; result += char; continue; }
     if (char === "\\") { escaped = true; result += char; continue; }
     if (char === '"') {
-      let next = i + 1;
-      while (next < text.length && /\s/.test(text[next])) next++;
-      if (next === text.length || /[:,}\]]/.test(text[next])) {
-        inString = false;
+      if (isLikelyStructuralModelQuote(text, i, stringStart, stack.at(-1))) {
+        stringStart = -1;
         result += char;
       } else {
         result += '\\"';
@@ -426,6 +431,77 @@ function escapeModelJsonStringQuotes(text) {
     else result += char;
   }
   return result;
+}
+
+function isLikelyStructuralModelQuote(text, quoteIndex, stringStart, container) {
+  const next = skipModelJsonWhitespace(text, quoteIndex + 1);
+  const following = text[next];
+  if (following === ":") {
+    // A colon can follow a key, but a quoted phrase in a value can also
+    // precede a literal colon. Check where this string began.
+    let previous = stringStart - 1;
+    while (previous >= 0 && /\s/.test(text[previous])) previous--;
+    return container === "{" && (text[previous] === "{" || text[previous] === ",");
+  }
+  if (following === (container === "{" ? "}" : "]")) return true;
+  if (following === '"') {
+    // Preserve separate strings when the separator is missing. The strict
+    // parse will reject the result instead of silently merging array items.
+    const end = findModelJsonStringEnd(text, next);
+    if (end < 0) return false;
+    const delimiter = text[skipModelJsonWhitespace(text, end + 1)];
+    return container === "[" ? delimiter === "," || delimiter === "]" : delimiter === ":";
+  }
+  if (following !== ",") return false;
+  const afterComma = skipModelJsonWhitespace(text, next + 1);
+  // A comma between array entries can precede any JSON value; a comma
+  // between object members must precede a quoted key and a colon.
+  if (container === "[") {
+    return /^(?:["{\[\d-]|true\b|false\b|null\b)/.test(text.slice(afterComma));
+  }
+  if (text[afterComma] !== '"') return false;
+  const keyEnd = findModelJsonStringEnd(text, afterComma);
+  return keyEnd >= 0 && text[skipModelJsonWhitespace(text, keyEnd + 1)] === ":";
+}
+
+function skipModelJsonWhitespace(text, index) {
+  while (index < text.length && /\s/.test(text[index])) index++;
+  return index;
+}
+
+function findModelJsonStringEnd(text, startIndex) {
+  for (let i = startIndex + 1; i < text.length; i++) {
+    if (text[i] === "\\") i++;
+    else if (text[i] === '"') return i;
+  }
+  return -1;
+}
+
+function extractFencedJsonBodies(text) {
+  const bodies = [];
+  const opening = /```(?:json)?\s*(?=[\[{])/gi;
+  while (opening.exec(text)) {
+    const start = opening.lastIndex;
+    let end = -1;
+    // Find the end of the root first so backticks inside strings cannot
+    // close a fence. Try ordinary JSON string boundaries before repair.
+    for (const repairQuotes of [false, true]) {
+      const root = extractBalancedString(text, start, repairQuotes);
+      if (!root) continue;
+      const afterRoot = skipModelJsonWhitespace(text, start + root.length);
+      if (text.startsWith("```", afterRoot)) {
+        end = afterRoot;
+        break;
+      }
+    }
+    // Keep a malformed fenced root as one candidate; never fall through
+    // to accepting a complete child from it.
+    if (end < 0) end = text.indexOf("```", start);
+    if (end < 0) break;
+    bodies.push(text.slice(start, end).trim());
+    opening.lastIndex = end + 3;
+  }
+  return bodies;
 }
 
 function isSafeModelJsonRepair(original, repaired) {
@@ -446,19 +522,21 @@ function isSafeModelJsonRepair(original, repaired) {
   return i === original.length && j === repaired.length;
 }
 
-function extractBalancedString(text, startIndex) {
+function extractBalancedString(text, startIndex, repairQuotes = false) {
   const stack = [];
-  let inString = false;
+  let stringStart = -1;
   let escaped = false;
   for (let i = startIndex; i < text.length; i++) {
     const char = text[i];
-    if (inString) {
+    if (stringStart >= 0) {
       if (escaped) escaped = false;
       else if (char === "\\") escaped = true;
-      else if (char === '"') inString = false;
+      else if (char === '"' && (!repairQuotes || isLikelyStructuralModelQuote(text, i, stringStart, stack.at(-1)))) {
+        stringStart = -1;
+      }
       continue;
     }
-    if (char === '"') { inString = true; continue; }
+    if (char === '"') { stringStart = i; continue; }
     if (char === "{" || char === "[") stack.push(char);
     else if (char === "}" || char === "]") {
       if (stack.pop() !== (char === "}" ? "{" : "[")) return null;
